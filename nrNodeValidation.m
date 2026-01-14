@@ -287,8 +287,9 @@ classdef nrNodeValidation
                 % Set wideband measurement CSI-RS configuration on the full bandwidth
                 csiReportConfig.NStartBWP = 0;
                 csiReportConfig.NSizeBWP = connConfig.NumResourceBlocks;
-                csiReportConfig.CQIMode = 'Subband';
-                csiReportConfig.PMIMode = 'Subband';
+                csiReportConfig.CQIMode = 'subband';
+                csiReportConfig.PMIMode = 'subband';
+                csiReportConfig.SubbandSize = 4;
                 csiReportConfig.PRGSize = [];
                 csiReportConfig.CodebookMode = 1;
                 csiReportConfig.CodebookSubsetRestriction = [];

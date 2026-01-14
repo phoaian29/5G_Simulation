@@ -143,6 +143,70 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
                 estChannelGridIntf, pdschInfo, carrierConfigInfo);
         end
 
+    %     function [dlRank, pmiSet, cqi, precodingMatrix, sinr] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
+    %         % Return CSI-RS measurment
+    % 
+    %         % Get CSI-RS packet of interest and the interfering packets
+    %         [csirsPacket, interferingPackets] = packetListIntfBuffer(obj, obj.CSIRSPacketType, ...
+    %             pktStartTime, pktEndTime);
+    % 
+    %         nVar = calculateThermalNoise(obj);
+    %         % Received power of gNB at UE for pathloss calculation
+    %         obj.GNBReceivedPower = csirsPacket.Power;
+    % 
+    %         rnti = obj.RNTI; % Get the RNTI of the current UE
+    % 
+    %         % Initialize packetOfInterest variable to store the matched CSI-RS packet
+    %         packetOfInterest = [];
+    % 
+    %         % Loop over CSI-RS packets to find the one that matches the current UE's RNTI
+    %         for pktIdx = 1:numel(csirsPacket)
+    %             metadata = csirsPacket(pktIdx).Metadata;
+    %             rntiList = metadata.RNTI;
+    %             % Check if the current UE's RNTI matches any RNTI in the list
+    %             if any(rnti == rntiList)
+    %                 packetOfInterest = csirsPacket(pktIdx);
+    %                 break;
+    %             end
+    %         end
+    % 
+    %         % Estimate channel for packet of interest and interferers
+    %         [estChannelGrid, estChannelGridIntf] = estimateChannelGrid(obj, packetOfInterest, ...
+    %             interferingPackets, carrierConfigInfo);
+    % 
+    %         % Prepare LQM input for interferers
+    %         intf = prepareLQMInputIntf(obj, obj.L2SMIUI, interferingPackets, estChannelGridIntf, ...
+    %             carrierConfigInfo, nVar);
+    % 
+    %         % Compute downlink rank and precoder based on the channel
+    %         if csirsConfig.NumCSIRSPorts > 1
+    %             [dlRank,pmiSet,pmiInfo] = nrRISelect(carrierConfigInfo, csirsConfig, ...
+    %                 obj.CSIReportConfig, estChannelGrid, nVar, 'MaxSE');
+    %         else
+    %             dlRank = 1;
+    %             pmiSet = struct(i1=[1 1 1], i2=1);
+    %             pmiInfo.W = 1;
+    %         end
+    %         blerThreshold = 0.1;
+    %         overhead = 0;
+    %         if obj.CSIReferenceResource.NumLayers ~= dlRank
+    %             obj.CSIReferenceResource.NumLayers = dlRank;
+    %         end
+    %         precodingMatrix = pmiInfo.W;
+    %         % For the given precoder prepare the LQM input
+    % 
+    %         [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
+    %             carrierConfigInfo,csirsConfig,estChannelGrid,nVar,pmiInfo.W.');
+    %         % Determine SINRs from Link Quality Model (LQM)
+    %         [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI,sig,intf);
+    %         % CQI Selection
+    %         [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
+    %             carrierConfigInfo,obj.CSIReferenceResource,overhead,sinr,obj.CQITableValues,blerThreshold);
+    %         cqi = max([cqi, 1]); % Ensure minimum CQI as 1
+    %         sinr = cqiInfo.EffectiveSINR;
+    %     end
+
+    %% anph44 modify function
         function [dlRank, pmiSet, cqi, precodingMatrix, sinr] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
             % Return CSI-RS measurment
 
@@ -187,25 +251,75 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
                 pmiSet = struct(i1=[1 1 1], i2=1);
                 pmiInfo.W = 1;
             end
+            
             blerThreshold = 0.1;
             overhead = 0;
             if obj.CSIReferenceResource.NumLayers ~= dlRank
                 obj.CSIReferenceResource.NumLayers = dlRank;
             end
+            
             precodingMatrix = pmiInfo.W;
-            % For the given precoder prepare the LQM input
 
+            % --- SỬA ĐỔI 1: Xử lý chuyển vị ma trận Precoder (Fix lỗi N-D arrays) ---
+            % Nếu chạy Subband, W là ma trận 3D, lệnh .' sẽ lỗi. Cần dùng permute.
+            if ~ismatrix(pmiInfo.W)
+                W_input = permute(pmiInfo.W, [2 1 3]);
+            else
+                W_input = pmiInfo.W.';
+            end
+
+            % For the given precoder prepare the LQM input
             [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
-                carrierConfigInfo,csirsConfig,estChannelGrid,nVar,pmiInfo.W.');
+                carrierConfigInfo,csirsConfig,estChannelGrid,nVar,W_input);
+
             % Determine SINRs from Link Quality Model (LQM)
             [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI,sig,intf);
-            % CQI Selection
-            [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
+
+            % --- SỬA ĐỔI 2: Vòng lặp tính Subband CQI (Fix lỗi chỉ ra 1 CQI) ---
+            
+            % Cấu hình kích thước Subband (4 PRBs cho băng thông >= 24 PRBs)
+            SubbandSize = 4; 
+            TotalRBs = carrierConfigInfo.NSizeGrid;
+            NumSubbands = ceil(TotalRBs / SubbandSize);
+            
+            % Mảng chứa kết quả CQI từng subband
+            cqiArray = zeros(1, NumSubbands);
+            
+            % Lưu lại PRBSet gốc (Wideband) để khôi phục sau khi tính xong
+            originalPRBSet = obj.CSIReferenceResource.PRBSet;
+            
+            % Vòng lặp tính riêng từng Subband
+            for sbIdx = 1:NumSubbands
+                % Xác định dải RB của subband này
+                rbStart = (sbIdx - 1) * SubbandSize;
+                rbEnd = min(sbIdx * SubbandSize, TotalRBs) - 1;
+                
+                % Cập nhật tài nguyên tham chiếu
+                obj.CSIReferenceResource.PRBSet = rbStart:rbEnd;
+                
+                % Gọi hàm cqiSelect cho riêng Subband này
+                [obj.L2SMCSI, cqiVal, ~] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
+                    carrierConfigInfo,obj.CSIReferenceResource,overhead,sinr,obj.CQITableValues,blerThreshold);
+                
+                % Lưu kết quả
+                cqiArray(sbIdx) = max(cqiVal, 1);
+            end
+            
+            % Khôi phục lại PRBSet gốc
+            obj.CSIReferenceResource.PRBSet = originalPRBSet;
+            
+            % Trả về mảng CQI
+            cqi = cqiArray; 
+            disp(cqi);
+
+            % (Tùy chọn) Tính lại SINR đại diện toàn dải để trả về biến 'sinr' chính xác cho đầu ra hàm
+            [obj.L2SMCSI, ~, cqiInfoWB] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
                 carrierConfigInfo,obj.CSIReferenceResource,overhead,sinr,obj.CQITableValues,blerThreshold);
-            cqi = max([cqi, 1]); % Ensure minimum CQI as 1
-            sinr = cqiInfo.EffectiveSINR;
+            sinr = cqiInfoWB.EffectiveSINR;
         end
+        %% 
     end
+
 
     methods (Access = private)
         function [crcFlag, sinr] = l2smCRC(obj, packetOfInterest, interferingPackets, estChannelGrid, ...
