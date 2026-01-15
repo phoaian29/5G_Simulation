@@ -143,230 +143,230 @@ classdef nrUEAbstractPHY < nr5g.internal.nrUEPHY
                 estChannelGridIntf, pdschInfo, carrierConfigInfo);
         end
 
-    %     function [dlRank, pmiSet, cqi, precodingMatrix, sinr] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
-    %         % Return CSI-RS measurment
-    % 
-    %         % Get CSI-RS packet of interest and the interfering packets
-    %         [csirsPacket, interferingPackets] = packetListIntfBuffer(obj, obj.CSIRSPacketType, ...
-    %             pktStartTime, pktEndTime);
-    % 
-    %         nVar = calculateThermalNoise(obj);
-    %         % Received power of gNB at UE for pathloss calculation
-    %         obj.GNBReceivedPower = csirsPacket.Power;
-    % 
-    %         rnti = obj.RNTI; % Get the RNTI of the current UE
-    % 
-    %         % Initialize packetOfInterest variable to store the matched CSI-RS packet
-    %         packetOfInterest = [];
-    % 
-    %         % Loop over CSI-RS packets to find the one that matches the current UE's RNTI
-    %         for pktIdx = 1:numel(csirsPacket)
-    %             metadata = csirsPacket(pktIdx).Metadata;
-    %             rntiList = metadata.RNTI;
-    %             % Check if the current UE's RNTI matches any RNTI in the list
-    %             if any(rnti == rntiList)
-    %                 packetOfInterest = csirsPacket(pktIdx);
-    %                 break;
-    %             end
-    %         end
-    % 
-    %         % Estimate channel for packet of interest and interferers
-    %         [estChannelGrid, estChannelGridIntf] = estimateChannelGrid(obj, packetOfInterest, ...
-    %             interferingPackets, carrierConfigInfo);
-    % 
-    %         % Prepare LQM input for interferers
-    %         intf = prepareLQMInputIntf(obj, obj.L2SMIUI, interferingPackets, estChannelGridIntf, ...
-    %             carrierConfigInfo, nVar);
-    % 
-    %         % Compute downlink rank and precoder based on the channel
-    %         if csirsConfig.NumCSIRSPorts > 1
-    %             [dlRank,pmiSet,pmiInfo] = nrRISelect(carrierConfigInfo, csirsConfig, ...
-    %                 obj.CSIReportConfig, estChannelGrid, nVar, 'MaxSE');
-    %         else
-    %             dlRank = 1;
-    %             pmiSet = struct(i1=[1 1 1], i2=1);
-    %             pmiInfo.W = 1;
-    %         end
-    %         blerThreshold = 0.1;
-    %         overhead = 0;
-    %         if obj.CSIReferenceResource.NumLayers ~= dlRank
-    %             obj.CSIReferenceResource.NumLayers = dlRank;
-    %         end
-    %         precodingMatrix = pmiInfo.W;
-    %         % For the given precoder prepare the LQM input
-    % 
-    %         [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
-    %             carrierConfigInfo,csirsConfig,estChannelGrid,nVar,pmiInfo.W.');
-    %         % Determine SINRs from Link Quality Model (LQM)
-    %         [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI,sig,intf);
-    %         % CQI Selection
-    %         [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
-    %             carrierConfigInfo,obj.CSIReferenceResource,overhead,sinr,obj.CQITableValues,blerThreshold);
-    %         cqi = max([cqi, 1]); % Ensure minimum CQI as 1
-    %         sinr = cqiInfo.EffectiveSINR;
-    %     end
+        function [dlRank, pmiSet, cqi, precodingMatrix, sinr] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
+            % Return CSI-RS measurment
 
-    %% anph44 modify function
-        function [dlRank, pmiSet, cqi, precodingMatrix, sinrEff] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
-        %decodeCSIRS (Abstract PHY style, stable with internal L2SM)
-        %   - RI/PMI: wideband
-        %   - CQI & Effective SINR: per-subband
-        %   Key fix: force wtxSB to 2D (single-PRG) to avoid internal PRG mapping errors
-        
-            %========================
-            % 1) Get CSI-RS packets
-            %========================
+            % Get CSI-RS packet of interest and the interfering packets
             [csirsPacket, interferingPackets] = packetListIntfBuffer(obj, obj.CSIRSPacketType, ...
                 pktStartTime, pktEndTime);
-        
+
             nVar = calculateThermalNoise(obj);
+            % Received power of gNB at UE for pathloss calculation
             obj.GNBReceivedPower = csirsPacket.Power;
-        
-            rnti = obj.RNTI;
+
+            rnti = obj.RNTI; % Get the RNTI of the current UE
+
+            % Initialize packetOfInterest variable to store the matched CSI-RS packet
             packetOfInterest = [];
+
+            % Loop over CSI-RS packets to find the one that matches the current UE's RNTI
             for pktIdx = 1:numel(csirsPacket)
                 metadata = csirsPacket(pktIdx).Metadata;
                 rntiList = metadata.RNTI;
+                % Check if the current UE's RNTI matches any RNTI in the list
                 if any(rnti == rntiList)
                     packetOfInterest = csirsPacket(pktIdx);
                     break;
                 end
             end
-        
-            if isempty(packetOfInterest)
-                dlRank = 1;
-                pmiSet = struct('i1',[1 1 1],'i2',1);
-                cqi = [];
-                precodingMatrix = 1;
-                sinrEff = [];
-                return;
-            end
-        
-            %========================
-            % 2) Channel estimate grids
-            %========================
+
+            % Estimate channel for packet of interest and interferers
             [estChannelGrid, estChannelGridIntf] = estimateChannelGrid(obj, packetOfInterest, ...
                 interferingPackets, carrierConfigInfo);
-        
-            %========================
-            % 3) RI/PMI selection (wideband)
-            %========================
+
+            % Prepare LQM input for interferers
+            intf = prepareLQMInputIntf(obj, obj.L2SMIUI, interferingPackets, estChannelGridIntf, ...
+                carrierConfigInfo, nVar);
+
+            % Compute downlink rank and precoder based on the channel
             if csirsConfig.NumCSIRSPorts > 1
-                [dlRank, pmiSet, pmiInfo] = nrRISelect(carrierConfigInfo, csirsConfig, ...
+                [dlRank,pmiSet,pmiInfo] = nrRISelect(carrierConfigInfo, csirsConfig, ...
                     obj.CSIReportConfig, estChannelGrid, nVar, 'MaxSE');
             else
                 dlRank = 1;
-                pmiSet = struct('i1',[1 1 1],'i2',1);
+                pmiSet = struct(i1=[1 1 1], i2=1);
                 pmiInfo.W = 1;
             end
-        
+            blerThreshold = 0.1;
+            overhead = 0;
             if obj.CSIReferenceResource.NumLayers ~= dlRank
                 obj.CSIReferenceResource.NumLayers = dlRank;
             end
-        
             precodingMatrix = pmiInfo.W;
-        
-            % Make W_input (ports x layers x something)
-            if ~ismatrix(pmiInfo.W)
-                W_input = permute(pmiInfo.W, [2 1 3]);   % avoid N-D transpose error
-            else
-                W_input = pmiInfo.W.';
-            end
-        
-            % --- KEY FIX: Force wtx for subband to be 2D only (avoid PRG path) ---
-            if ndims(W_input) > 2
-                wtxSB = W_input(:,:,1);
-            else
-                wtxSB = W_input;
-            end
-        
-            %========================
-            % 4) Subband CQI
-            %========================
-            blerThreshold = 0.1;
-            overhead = 0;
-        
-            SubbandSize = 4;
-            TotalRBs = double(carrierConfigInfo.NSizeGrid);
-            NumSubbands = ceil(TotalRBs / SubbandSize);
-        
-            cqi = zeros(1, NumSubbands);
-            sinrEff = zeros(1, NumSubbands);
-        
-            % Find subcarrier dimension (expected = 12*NSizeGrid)
-            expectedNsc = 12 * TotalRBs;
-            scDim = findDimBySize_nested(estChannelGrid, expectedNsc);
-            if scDim == 0
-                error("Cannot identify subcarrier dimension. size(estChannelGrid)=%s, expected Nsc=%d", ...
-                    mat2str(size(estChannelGrid)), expectedNsc);
-            end
-        
-            for sbIdx = 1:NumSubbands
-                rbStart = (sbIdx - 1) * SubbandSize;
-                rbEnd   = min(sbIdx * SubbandSize, TotalRBs) - 1;
-                nRB_sb  = rbEnd - rbStart + 1;
-        
-                % RB -> subcarrier indices
-                scStart = rbStart*12 + 1;
-                scEnd   = (rbEnd+1)*12;
-        
-                % Slice channel grids to subband
-                estChSB     = sliceAlongDim_nested(estChannelGrid,     scDim, scStart, scEnd);
-                estChIntfSB = sliceAlongDim_nested(estChannelGridIntf, scDim, scStart, scEnd);
-        
-                % Carrier for subband: treat as independent BWP starting at 0 (DOUBLE scalars)
-                carrierSB = carrierConfigInfo;
-                carrierSB.NSizeGrid  = double(nRB_sb);
-                carrierSB.NStartGrid = 0;  % scalar double (important)
-        
-                % Fresh L2SM contexts for subband (avoid wideband cache mismatch)
-                l2smCSI_SB = nr5g.internal.L2SM.initialize(carrierSB);
-                l2smIUI_SB = nr5g.internal.L2SM.initialize(carrierSB);
-        
-                % Interference input (subband)
-                intfSB = prepareLQMInputIntf(obj, l2smIUI_SB, interferingPackets, estChIntfSB, ...
-                    carrierSB, nVar);
-        
-                % LQM signal + SINR (subband)
-                [l2smCSI_SB, sigSB] = nr5g.internal.L2SM.prepareLQMInput(l2smCSI_SB, ...
-                    carrierSB, csirsConfig, estChSB, nVar, wtxSB);
-        
-                [l2smCSI_SB, sinrSB] = nr5g.internal.L2SM.linkQualityModel(l2smCSI_SB, sigSB, intfSB);
-        
-                % CQI for this subband (PRBSet aligned to carrierSB)
-                csiRefSB = obj.CSIReferenceResource;
-                csiRefSB.PRBSet = 0:(double(nRB_sb)-1);
-        
-                [l2smCSI_SB, cqiVal, cqiInfo] = nr5g.internal.L2SM.cqiSelect(l2smCSI_SB, ...
-                    carrierSB, csiRefSB, overhead, sinrSB, obj.CQITableValues, blerThreshold);
-        
-                cqi(sbIdx) = max(cqiVal, 1);
-                sinrEff(sbIdx) = cqiInfo.EffectiveSINR;
-            end
-        
-            disp(cqi)
-            disp([min(sinrEff) max(sinrEff)])
-            disp("NumSubbands=" + NumSubbands);
-            disp("size(sinrEff)="); disp(size(sinrEff));
-            disp("sinrEff="); disp(sinrEff);
+            % For the given precoder prepare the LQM input
 
-            %========================
-            % Nested helpers
-            %========================
-            function dim = findDimBySize_nested(A, targetSize)
-                sz = size(A);
-                dim = find(sz == targetSize, 1, 'first');
-                if isempty(dim), dim = 0; end
-            end
-        
-            function Y = sliceAlongDim_nested(X, dim, iStart, iEnd)
-                if isempty(X), Y = X; return; end
-                idx = repmat({':'}, 1, ndims(X));
-                idx{dim} = iStart:iEnd;
-                Y = X(idx{:});
-            end
-        
+            [obj.L2SMCSI, sig] = nr5g.internal.L2SM.prepareLQMInput(obj.L2SMCSI, ...
+                carrierConfigInfo,csirsConfig,estChannelGrid,nVar,pmiInfo.W.');
+            % Determine SINRs from Link Quality Model (LQM)
+            [obj.L2SMCSI, sinr] = nr5g.internal.L2SM.linkQualityModel(obj.L2SMCSI,sig,intf);
+            % CQI Selection
+            [obj.L2SMCSI, cqi, cqiInfo] = nr5g.internal.L2SM.cqiSelect(obj.L2SMCSI, ...
+                carrierConfigInfo,obj.CSIReferenceResource,overhead,sinr,obj.CQITableValues,blerThreshold);
+            cqi = max([cqi, 1]); % Ensure minimum CQI as 1
+            sinr = cqiInfo.EffectiveSINR;
         end
+
+    %% anph44 modify function
+        % function [dlRank, pmiSet, cqi, precodingMatrix, sinrEff] = decodeCSIRS(obj, csirsConfig, pktStartTime, pktEndTime, carrierConfigInfo)
+        % %decodeCSIRS (Abstract PHY style, stable with internal L2SM)
+        % %   - RI/PMI: wideband
+        % %   - CQI & Effective SINR: per-subband
+        % %   Key fix: force wtxSB to 2D (single-PRG) to avoid internal PRG mapping errors
+        % 
+        %     %========================
+        %     % 1) Get CSI-RS packets
+        %     %========================
+        %     [csirsPacket, interferingPackets] = packetListIntfBuffer(obj, obj.CSIRSPacketType, ...
+        %         pktStartTime, pktEndTime);
+        % 
+        %     nVar = calculateThermalNoise(obj);
+        %     obj.GNBReceivedPower = csirsPacket.Power;
+        % 
+        %     rnti = obj.RNTI;
+        %     packetOfInterest = [];
+        %     for pktIdx = 1:numel(csirsPacket)
+        %         metadata = csirsPacket(pktIdx).Metadata;
+        %         rntiList = metadata.RNTI;
+        %         if any(rnti == rntiList)
+        %             packetOfInterest = csirsPacket(pktIdx);
+        %             break;
+        %         end
+        %     end
+        % 
+        %     if isempty(packetOfInterest)
+        %         dlRank = 1;
+        %         pmiSet = struct('i1',[1 1 1],'i2',1);
+        %         cqi = [];
+        %         precodingMatrix = 1;
+        %         sinrEff = [];
+        %         return;
+        %     end
+        % 
+        %     %========================
+        %     % 2) Channel estimate grids
+        %     %========================
+        %     [estChannelGrid, estChannelGridIntf] = estimateChannelGrid(obj, packetOfInterest, ...
+        %         interferingPackets, carrierConfigInfo);
+        % 
+        %     %========================
+        %     % 3) RI/PMI selection (wideband)
+        %     %========================
+        %     if csirsConfig.NumCSIRSPorts > 1
+        %         [dlRank, pmiSet, pmiInfo] = nrRISelect(carrierConfigInfo, csirsConfig, ...
+        %             obj.CSIReportConfig, estChannelGrid, nVar, 'MaxSE');
+        %     else
+        %         dlRank = 1;
+        %         pmiSet = struct('i1',[1 1 1],'i2',1);
+        %         pmiInfo.W = 1;
+        %     end
+        % 
+        %     if obj.CSIReferenceResource.NumLayers ~= dlRank
+        %         obj.CSIReferenceResource.NumLayers = dlRank;
+        %     end
+        % 
+        %     precodingMatrix = pmiInfo.W;
+        % 
+        %     % Make W_input (ports x layers x something)
+        %     if ~ismatrix(pmiInfo.W)
+        %         W_input = permute(pmiInfo.W, [2 1 3]);   % avoid N-D transpose error
+        %     else
+        %         W_input = pmiInfo.W.';
+        %     end
+        % 
+        %     % --- KEY FIX: Force wtx for subband to be 2D only (avoid PRG path) ---
+        %     if ndims(W_input) > 2
+        %         wtxSB = W_input(:,:,1);
+        %     else
+        %         wtxSB = W_input;
+        %     end
+        % 
+        %     %========================
+        %     % 4) Subband CQI
+        %     %========================
+        %     blerThreshold = 0.1;
+        %     overhead = 0;
+        % 
+        %     SubbandSize = 4;
+        %     TotalRBs = double(carrierConfigInfo.NSizeGrid);
+        %     NumSubbands = ceil(TotalRBs / SubbandSize);
+        % 
+        %     cqi = zeros(1, NumSubbands);
+        %     sinrEff = zeros(1, NumSubbands);
+        % 
+        %     % Find subcarrier dimension (expected = 12*NSizeGrid)
+        %     expectedNsc = 12 * TotalRBs;
+        %     scDim = findDimBySize_nested(estChannelGrid, expectedNsc);
+        %     if scDim == 0
+        %         error("Cannot identify subcarrier dimension. size(estChannelGrid)=%s, expected Nsc=%d", ...
+        %             mat2str(size(estChannelGrid)), expectedNsc);
+        %     end
+        % 
+        %     for sbIdx = 1:NumSubbands
+        %         rbStart = (sbIdx - 1) * SubbandSize;
+        %         rbEnd   = min(sbIdx * SubbandSize, TotalRBs) - 1;
+        %         nRB_sb  = rbEnd - rbStart + 1;
+        % 
+        %         % RB -> subcarrier indices
+        %         scStart = rbStart*12 + 1;
+        %         scEnd   = (rbEnd+1)*12;
+        % 
+        %         % Slice channel grids to subband
+        %         estChSB     = sliceAlongDim_nested(estChannelGrid,     scDim, scStart, scEnd);
+        %         estChIntfSB = sliceAlongDim_nested(estChannelGridIntf, scDim, scStart, scEnd);
+        % 
+        %         % Carrier for subband: treat as independent BWP starting at 0 (DOUBLE scalars)
+        %         carrierSB = carrierConfigInfo;
+        %         carrierSB.NSizeGrid  = double(nRB_sb);
+        %         carrierSB.NStartGrid = 0;  % scalar double (important)
+        % 
+        %         % Fresh L2SM contexts for subband (avoid wideband cache mismatch)
+        %         l2smCSI_SB = nr5g.internal.L2SM.initialize(carrierSB);
+        %         l2smIUI_SB = nr5g.internal.L2SM.initialize(carrierSB);
+        % 
+        %         % Interference input (subband)
+        %         intfSB = prepareLQMInputIntf(obj, l2smIUI_SB, interferingPackets, estChIntfSB, ...
+        %             carrierSB, nVar);
+        % 
+        %         % LQM signal + SINR (subband)
+        %         [l2smCSI_SB, sigSB] = nr5g.internal.L2SM.prepareLQMInput(l2smCSI_SB, ...
+        %             carrierSB, csirsConfig, estChSB, nVar, wtxSB);
+        % 
+        %         [l2smCSI_SB, sinrSB] = nr5g.internal.L2SM.linkQualityModel(l2smCSI_SB, sigSB, intfSB);
+        % 
+        %         % CQI for this subband (PRBSet aligned to carrierSB)
+        %         csiRefSB = obj.CSIReferenceResource;
+        %         csiRefSB.PRBSet = 0:(double(nRB_sb)-1);
+        % 
+        %         [l2smCSI_SB, cqiVal, cqiInfo] = nr5g.internal.L2SM.cqiSelect(l2smCSI_SB, ...
+        %             carrierSB, csiRefSB, overhead, sinrSB, obj.CQITableValues, blerThreshold);
+        % 
+        %         cqi(sbIdx) = max(cqiVal, 1);
+        %         sinrEff(sbIdx) = cqiInfo.EffectiveSINR;
+        %     end
+        % 
+        %     disp(cqi)
+        %     disp([min(sinrEff) max(sinrEff)])
+        %     disp("NumSubbands=" + NumSubbands);
+        %     disp("size(sinrEff)="); disp(size(sinrEff));
+        %     disp("sinrEff="); disp(sinrEff);
+        % 
+        %     %========================
+        %     % Nested helpers
+        %     %========================
+        %     function dim = findDimBySize_nested(A, targetSize)
+        %         sz = size(A);
+        %         dim = find(sz == targetSize, 1, 'first');
+        %         if isempty(dim), dim = 0; end
+        %     end
+        % 
+        %     function Y = sliceAlongDim_nested(X, dim, iStart, iEnd)
+        %         if isempty(X), Y = X; return; end
+        %         idx = repmat({':'}, 1, ndims(X));
+        %         idx{dim} = iStart:iEnd;
+        %         Y = X(idx{:});
+        %     end
+        % 
+        % end
 
 
         %% 
