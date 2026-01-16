@@ -24,6 +24,13 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
         UEContext
     end
 
+    properties (SetAccess = public)
+        % Cấu hình kết nối DRL
+        DRL_IP = "127.0.0.1";
+        DRL_Port = 5555;
+        DRL_Socket = [];
+    end
+
     properties (SetAccess = protected, Hidden)
         %NumUEs Total number of UEs connected to the gNB
         NumUEs=0;
@@ -204,6 +211,49 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
             'BeamIndex',[],'W',[],'FeedbackSlotOffset',[],'RV',[],'PRBSet',[]);
     end
 
+
+
+
+    methods (Access = public)
+        function success = connectToDRLAgent(obj)
+            try
+                obj.DRL_Socket = tcpclient(obj.DRL_IP, obj.DRL_Port, 'Timeout', 10);
+                disp('✅ [Bridge] Đã kết nối thành công tới Python DRL Agent.');
+                success = true;
+            catch
+                disp('❌ [Bridge] Không thể kết nối tới Python. Kiểm tra lại server script!');
+                success = false;
+            end
+        end
+    
+        function action = getActionFromDRL(obj, stateStruct)
+            % 1. Serialize: Chuyển State thành JSON
+            jsonState = jsonencode(stateStruct);
+            
+            % 2. Send: Gửi dữ liệu + Ký tự xuống dòng (\n) để Python nhận biết kết thúc gói tin
+            write(obj.DRL_Socket, uint8(jsonState));
+            write(obj.DRL_Socket, uint8(10)); % Newline character (ASCII 10)
+            
+            % 3. Receive: Đọc phản hồi từ Python
+            % Đọc cho đến khi có dữ liệu (Blocking mode cho đồng bộ)
+            while obj.DRL_Socket.NumBytesAvailable == 0
+                % Chờ một chút để không chiếm dụng CPU
+                pause(0.001); 
+            end
+            
+            % Đọc toàn bộ bytes có sẵn
+            rawData = read(obj.DRL_Socket, obj.DRL_Socket.NumBytesAvailable);
+            responseStr = char(rawData);
+            
+            % 4. Parse: Giải mã JSON thành Action
+            response = jsondecode(responseStr);
+            action = response.action; % Giả sử Python gửi về field "action"
+        end
+    end
+
+
+
+
     methods (Access = protected)
         function dlAssignments = scheduleNewTransmissionsDL(obj, timeFrequencyResource, schedulingInfo)
             %scheduleNewTransmissionsDL Assign resources for new DL transmissions in a transmission time interval (TTI)
@@ -338,7 +388,7 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
                 carrierContext = eligibleUEContext.ComponentCarrier(1);
                 csiMeasurement = carrierContext.CSIMeasurementDL;
                 % csiMeasurementCQI = csiMeasurement.CSIRS.CQI*cqiSizeArray;
-                % E
+                csiMeasurementCQI = max(csiMeasurement.CSIRS.CQI(:)) * cqiSizeArray(1);
                 channelQuality(rnti, :) = csiMeasurementCQI;
                 if isempty(carrierContext.CSIRSConfiguration)
                     numCSIRSPorts = obj.CellConfig(1).NumTransmitAntennas;
@@ -1325,6 +1375,14 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
             % Update UE context with respect to packet reception success/failure
             obj.UEContext(rxResultInfo.RNTI).handleULRxResult(rxResultInfo, obj.SchedulerConfig);
         end
+
+
+
+        
+
+
+
+
 
         function [allottedUEs, freqAllocation, mcsIndex, W] = runSchedulingStrategyRAT0(obj, schedulerInput)
             %runSchedulingStrategyRAT0 Implements the round-robin, proportional fair
@@ -2806,7 +2864,27 @@ classdef nrScheduler < handle & comm.internal.ConfigBase
                     numPRGs =  ceil(obj.CellConfig(carrierIndex).NumResourceBlocks/carrierContext.PrecodingGranularity);
                     W = complex(zeros(rank, size(report.W,1), numPRGs,1));
                     for i=1:numPRGs
-                        W(:,:,i) = report.W.';
+                        % W(:,:,i) = report.W.'; edit by anph44
+
+                            % --- SỬA LỖI MA TRẬN W SUBBAND ---
+                        if ismatrix(report.W)
+                            % Trường hợp Wideband (Ma trận 2D): Giữ nguyên logic cũ
+                            W(:,:,i) = report.W.';
+                        else
+                            % Trường hợp Subband (Ma trận 3D: NumTx x NumLayers x NumSubbands)
+                            % Cần chuyển vị 2 chiều đầu tiên: [2 1 3]
+                            wSub = permute(report.W, [2 1 3]);
+                            
+                            % Gán vào W. Lưu ý W sẽ trở thành ma trận 4 chiều nếu có nhiều báo cáo (i > 1)
+                            % Hoặc 3 chiều nếu chỉ có 1 báo cáo.
+                            if i == 1
+                                 W = wSub;
+                            else
+                                 % Nếu có nhiều report, cần ghép nối theo chiều thứ 4
+                                 W = cat(4, W, wSub);
+                            end
+                        end
+                    % ---------------------------------
                     end
                 end
             end

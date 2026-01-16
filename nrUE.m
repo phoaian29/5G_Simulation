@@ -72,7 +72,7 @@ classdef nrUE < wirelessnetwork.internal.nrNode
     properties(SetAccess = private)
         %NoiseFigure Noise figure in dB
         %   Specify the noise figure in dB. The default value is 6.
-        NoiseFigure(1,1) {mustBeNumeric, mustBeFinite, mustBeNonnegative} = 100;
+        NoiseFigure(1,1) {mustBeNumeric, mustBeFinite, mustBeNonnegative} = 6;
 
         %ReceiveGain Receiver gain in dB
         %   Specify the receiver gain in dB. The default value is 0.
